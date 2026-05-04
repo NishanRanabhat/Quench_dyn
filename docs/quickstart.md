@@ -83,14 +83,14 @@ mps = product_state(sites, labels)
 # set up DMRG
 state = MPSState(mps, mpo; center=1)
 solver = LanczosSolver(4, 100)
-schedule = SweepSchedule(64, 20; cutoff_final=1e-10)
+opts = DMRGOptions(64, 1e-10, d)
+n_sweeps = 20
 
 # run sweeps
 E = 0.0
-for sweep in 1:schedule.n_sweeps
-    opts = DMRGOptions(schedule.maxdims[sweep], schedule.cutoffs[sweep], d)
+for sweep in 1:n_sweeps
     dir = isodd(sweep) ? :right : :left
-    E = dmrg_sweep(state, solver, opts, dir)
+    E = dmrg_sweep(state, solver, opts, dir).E
 end
 
 println("Ground state energy: $E")
@@ -114,10 +114,10 @@ mps = product_state(sites, labels)
 
 state = MPSState(mps, mpo_i; center=1)
 solver = LanczosSolver(4, 100)
-schedule = SweepSchedule(64, 20; cutoff_final=1e-10)
+opts = DMRGOptions(64, 1e-10, d)
+n_sweeps = 20
 
-for sweep in 1:schedule.n_sweeps
-    opts = DMRGOptions(schedule.maxdims[sweep], schedule.cutoffs[sweep], d)
+for sweep in 1:n_sweeps
     dir = isodd(sweep) ? :right : :left
     dmrg_sweep(state, solver, opts, dir)
 end

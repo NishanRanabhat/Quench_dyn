@@ -99,13 +99,13 @@ for (idx, p) in enumerate(test_params_gs)
 
     state = MPSState(mps, mpo; center=1)
     solver = LanczosSolver(4, 100)   # krylov_dim, max_iter
-    schedule = SweepSchedule(32, 20; cutoff_final=1e-12)
+    n_sweeps = 20
+    opts = DMRGOptions(32, 1e-12, d)
 
     E_dmrg = 0.0
-    for sweep in 1:schedule.n_sweeps
-        opts = DMRGOptions(schedule.maxdims[sweep], schedule.cutoffs[sweep], d)
+    for sweep in 1:n_sweeps
         dir = isodd(sweep) ? :right : :left
-        E_dmrg = dmrg_sweep(state, solver, opts, dir)
+        E_dmrg = dmrg_sweep(state, solver, opts, dir).E
     end
 
     diff = abs(E_dmrg - E_ed)

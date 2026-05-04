@@ -22,13 +22,18 @@ function _svd_truncate(A::Matrix{T}, chi_max::Int, cutoff::Float64) where T
     S_rel = nrm > 0 ? F.S ./ nrm : F.S
     chi_cut = findfirst(x -> x < cutoff, S_rel)
     chi_cut = isnothing(chi_cut) ? length(F.S) : chi_cut - 1
-    chi = min(chi_cut, chi_max, length(F.S))
+    chi = max(min(chi_cut, chi_max, length(F.S)), 1)
 
     U = F.U[:, 1:chi]
     S = F.S[1:chi]              # keep the true singular values
     V = F.Vt[1:chi, :]
 
-    return U, S, V
+    # Relative discarded weight: fraction of norm² shed by this truncation.
+    total_sq = sum(abs2, F.S)
+    kept_sq  = sum(abs2, S)
+    discarded = total_sq > 0 ? (total_sq - kept_sq) / total_sq : 0.0
+
+    return U, S, V, discarded
 end
 
 

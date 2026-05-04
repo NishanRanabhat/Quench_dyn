@@ -33,13 +33,18 @@ src/
 scripts/
   run_dmrg.jl            # ground state search with all parameters documented
   run_tdvp.jl            # full quench protocol (DMRG ground state + TDVP evolution)
+  scan_tdvp_chi.jl       # χ-scan for TDVP, writes one CSV per χ + cross-χ summary
 tests/
   validate_mpo_and_gs.jl # MPO vs ED Hamiltonian + DMRG vs ED ground state
   validate_tdvp.jl       # TDVP vs ED time evolution (local observables + fidelity)
+  benchmark_tdvp_drift.jl# single-run drift diagnostic, writes CSV
 docs/
+  algorithms_primer.md   # *start here if new to MPS*: pedagogical primer
+  diagnostics_guide.md   # how to read CSV diagnostics + troubleshooting trees
+  parameter_reference.md # cheat sheet for picking χ, dt, cutoffs, etc.
   quickstart.md          # get running in 5 minutes
   architecture.md        # code structure, types, data flow
-  algorithms.md          # DMRG and TDVP details, parameter tuning
+  algorithms.md          # DMRG/TDVP code-level reference (sweep mechanics)
   mpo_construction.md    # MPO W-matrix structure and conventions
   ed_module.md           # exact diagonalization usage
   observables.md         # all measurement functions
@@ -70,11 +75,17 @@ Edit the parameter blocks at the top of each script to configure your simulation
 
 ## Documentation
 
-See the `docs/` folder for detailed documentation:
+Reading order if you are new to tensor networks:
 
-- **[Quickstart](docs/quickstart.md)** -- install, validate, run your first simulation
-- **[Architecture](docs/architecture.md)** -- module structure, key types, data flow
-- **[Algorithms](docs/algorithms.md)** -- DMRG/TDVP sweep logic, parameter tuning
-- **[MPO Construction](docs/mpo_construction.md)** -- W-matrix structure, upper-triangular convention
-- **[ED Module](docs/ed_module.md)** -- exact diagonalization for benchmarking
-- **[Observables](docs/observables.md)** -- all measurement functions (MPS and ED)
+1. **[Algorithms primer](docs/algorithms_primer.md)** — what bond dimension is, how DMRG and 2-site TDVP work, why TDVP-2 cannot conserve norm under truncation. Read this first.
+2. **[Quickstart](docs/quickstart.md)** — install, validate, run your first simulation.
+3. **[Diagnostics guide](docs/diagnostics_guide.md)** — what every column in `quench_log.csv` means, troubleshooting decision trees, three worked CSV examples. Read this *after* a run finishes and you don't yet know if you can trust it.
+4. **[Parameter reference](docs/parameter_reference.md)** — cheat sheet for picking χ, dt, cutoffs, sweeps. Reach for this when tuning.
+
+Reference documentation (developer / maintainer):
+
+- **[Architecture](docs/architecture.md)** — module structure, key types, data flow
+- **[Algorithms (code-level)](docs/algorithms.md)** — sweep mechanics, environment construction
+- **[MPO construction](docs/mpo_construction.md)** — W-matrix structure, upper-triangular convention
+- **[ED module](docs/ed_module.md)** — exact diagonalization for benchmarking
+- **[Observables](docs/observables.md)** — all measurement functions (MPS and ED)

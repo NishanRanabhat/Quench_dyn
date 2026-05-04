@@ -35,7 +35,7 @@ include("ED/observables.jl")
 
 # Types
 export TensorNetwork, MPS, MPO, MPDO, Environment
-export DMRGOptions, TDVPOptions, SweepSchedule
+export DMRGOptions, TDVPOptions
 export MPSState
 export AbstractSite, SpinSite, SuperSite
 export Channel, Spin
@@ -54,7 +54,7 @@ export product_state, random_state
 export dmrg_sweep, tdvp_sweep
 
 # Measurements
-export measure_energy, measure_norm
+export measure_energy, measure_norm, energy_variance
 export measure_local_observable, measure_correlation
 
 # TensorOps

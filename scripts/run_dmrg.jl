@@ -13,13 +13,18 @@ using LinearAlgebra
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 using QuenchDyn
 
+# BLAS multi-threading for dense linear algebra (SVD, matmul inside tensor
+# contractions). Override by setting BLAS_THREADS in the environment, e.g.
+#   BLAS_THREADS=8 julia run_dmrg.jl
+BLAS.set_num_threads(parse(Int, get(ENV, "BLAS_THREADS", string(Sys.CPU_THREADS))))
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MODEL PARAMETERS
 # ═══════════════════════════════════════════════════════════════════════════
 
-N     = 20       # number of sites
+N     = 32       # number of sites
 J     = 1.0      # XY coupling strength (sets the energy scale)
-Delta = 3.0      # Ising anisotropy Sz·Sz (Delta/J > 1 is the Ising phase)
+Delta = 0.5      # Ising anisotropy Sz·Sz (Delta/J > 1 is the Ising phase)
 d     = 2        # local Hilbert space dimension (2 for spin-1/2)
 
 # Site-dependent longitudinal field h_i.
@@ -34,17 +39,13 @@ h = zeros(N)
 # DMRG PARAMETERS
 # ═══════════════════════════════════════════════════════════════════════════
 
-chi_max   = 128      # maximum bond dimension (controls accuracy vs cost)
+chi_max   = 64      # maximum bond dimension (controls accuracy vs cost)
 n_sweeps  = 30       # total number of DMRG sweeps
-cutoff    = 1e-10    # SVD truncation cutoff (discard singular values below this)
-
-# SweepSchedule ramps chi linearly from chi_min to chi_max over the first
-# half of sweeps, then holds at chi_max. Cutoff tightens similarly.
-chi_min   = max(chi_max ÷ 8, 2)   # starting bond dimension for the ramp
+cutoff    = 1e-8    # SVD truncation cutoff (discard singular values below this)
 
 # Lanczos eigensolver parameters (for the local effective Hamiltonian)
 krylov_dim = 4       # Lanczos vectors per iteration (small is fine for ground state)
-max_iter   = 100     # maximum Lanczos restarts
+max_iter   = 14     # maximum Lanczos restarts
 
 # ═══════════════════════════════════════════════════════════════════════════
 # INITIAL STATE
@@ -68,7 +69,8 @@ println("\nModel: N=$N, J=$J, Delta=$Delta")
 println("Field: h = ", length(h) <= 10 ? "$h" : "[$(h[1]), $(h[2]), ..., $(h[end])]")
 println("DMRG:  chi_max=$chi_max, n_sweeps=$n_sweeps, cutoff=$cutoff")
 println("Lanczos: krylov_dim=$krylov_dim, max_iter=$max_iter")
-println("Init:  $init_state\n")
+println("Init:  $init_state")
+println("BLAS threads: $(BLAS.get_num_threads())\n")
 
 mpo = build_xxz_mpo(N, J, Delta, h; d=d)
 
@@ -94,24 +96,26 @@ end
 
 state = MPSState(mps, mpo; center=1)
 solver = LanczosSolver(krylov_dim, max_iter)
-schedule = SweepSchedule(chi_max, n_sweeps; chi_min=chi_min, cutoff_final=cutoff)
+opts = DMRGOptions(chi_max, cutoff, d)
 
 println("─"^70)
-println("  Sweep   chi    cutoff         energy")
+println("  Sweep   max_χ   max_trunc    total_trunc       energy")
 println("─"^70)
 
 E_dmrg = 0.0
-for sweep in 1:schedule.n_sweeps
+for sweep in 1:n_sweeps
     global E_dmrg
-    opts = DMRGOptions(schedule.maxdims[sweep], schedule.cutoffs[sweep], d)
     dir = isodd(sweep) ? :right : :left
-    E_dmrg = dmrg_sweep(state, solver, opts, dir)
-    println("  $(lpad(sweep, 3))     $(lpad(schedule.maxdims[sweep], 4))   $(schedule.cutoffs[sweep])   $E_dmrg")
+    res = dmrg_sweep(state, solver, opts, dir)
+    E_dmrg = res.E
+    println("  $(lpad(sweep, 3))     $(lpad(res.max_chi, 4))   $(lpad(round(res.max_trunc, sigdigits=3), 10))   $(lpad(round(res.total_trunc, sigdigits=3), 10))    $E_dmrg")
 end
 
+var_E = energy_variance(state)
 println("─"^70)
 println("  Final ground state energy: $E_dmrg")
 println("  Final norm: $(measure_norm(state.mps))")
+println("  Energy variance ⟨H²⟩ − ⟨H⟩²: $var_E   (zero at exact eigenstate)")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # MEASUREMENTS

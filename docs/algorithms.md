@@ -94,18 +94,6 @@ The Lanczos algorithm:
 4. Extract the lowest eigenvalue/eigenvector
 5. If not converged, restart with the current best eigenvector
 
-### Sweep schedule
-
-`SweepSchedule` controls how chi and cutoff evolve across sweeps:
-
-```julia
-schedule = SweepSchedule(chi_max, n_sweeps; chi_min=chi_max/8, cutoff_final=1e-10)
-```
-
-The schedule ramps chi linearly from `chi_min` to `chi_max` over the first half of sweeps, then holds at `chi_max`. The cutoff starts loose and tightens to `cutoff_final`.
-
-**Why ramp?** Starting with small chi is faster and helps avoid getting stuck in local minima. The state is rough at first and gets refined as chi increases.
-
 ### Parameter tuning guidelines
 
 | Parameter | Start with | Increase if... |
@@ -123,13 +111,14 @@ The schedule ramps chi linearly from `chi_min` to `chi_max` over the first half 
 ```julia
 state = MPSState(mps, mpo; center=1)
 solver = LanczosSolver(4, 100)
-schedule = SweepSchedule(128, 30; cutoff_final=1e-10)
+opts = DMRGOptions(128, 1e-10, d)
+n_sweeps = 30
 
-for sweep in 1:schedule.n_sweeps
-    opts = DMRGOptions(schedule.maxdims[sweep], schedule.cutoffs[sweep], d)
+for sweep in 1:n_sweeps
     dir = isodd(sweep) ? :right : :left
-    E = dmrg_sweep(state, solver, opts, dir)
-    # E is the energy from the last bond optimization in this sweep
+    res = dmrg_sweep(state, solver, opts, dir)
+    # res = (E, max_trunc, total_trunc, max_chi)
+    E = res.E
 end
 ```
 

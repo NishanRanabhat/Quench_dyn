@@ -128,15 +128,7 @@ struct TDVPOptions
     cutoff::Float64      # SVD truncation cutoff
     local_dim::Int       # local Hilbert space dimension (d)
 end
-
-struct SweepSchedule
-    maxdims::Vector{Int}       # per-sweep chi values
-    cutoffs::Vector{Float64}   # per-sweep cutoff values
-    n_sweeps::Int
-end
 ```
-
-`SweepSchedule(chi_max, n_sweeps)` ramps chi linearly from `chi_min` to `chi_max` over the first half of sweeps, then holds. Cutoff tightens similarly.
 
 ### Solvers
 

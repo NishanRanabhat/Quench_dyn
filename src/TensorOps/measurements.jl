@@ -29,6 +29,36 @@ function measure_energy(state::MPSState)
 end
 
 """
+    energy_variance(state::MPSState)
+
+Compute ⟨ψ|H²|ψ⟩ − ⟨ψ|H|ψ⟩². Equals zero (up to truncation) at an exact
+eigenstate of H, so it is the gold-standard convergence diagnostic for
+DMRG ground-state runs. Costs O(N · χ³ · D² · d) per call.
+"""
+function energy_variance(state::MPSState)
+    mps = state.mps
+    mpo = state.mpo
+    N = length(mps.tensors)
+    Tenv = promote_type(eltype(mps.tensors[1]), eltype(mpo.tensors[1]))
+
+    E = measure_energy(state)
+
+    # 4-index left environment: [bra_bond, upper_mpo_bond, lower_mpo_bond, ket_bond]
+    L = ones(Tenv, 1, 1, 1, 1)
+    for i in 1:N
+        A = mps.tensors[i]
+        W = mpo.tensors[i]
+        @tensoropt L_new[-1,-2,-3,-4] := L[5,6,7,8] * conj(A)[5,9,-1] *
+                                         W[6,-2,9,10] * W[7,-3,10,11] *
+                                         A[8,11,-4]
+        L = L_new
+    end
+    H_sq = real(L[1, 1, 1, 1])
+
+    return H_sq - E^2
+end
+
+"""
     measure_norm(state::MPSState)
 
 Compute ⟨ψ|ψ⟩ by contracting MPS with itself (no MPO).
