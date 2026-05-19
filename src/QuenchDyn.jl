@@ -14,6 +14,7 @@ include("TensorOps/decomposition.jl")
 include("TensorOps/canonicalization.jl")
 include("TensorOps/environment.jl")
 include("TensorOps/measurements.jl")
+include("TensorOps/padding.jl")
 
 # ── Algorithms ────────────────────────────────────────────────────────────
 include("Algorithms/solvers.jl")
@@ -51,7 +52,7 @@ export build_xxz_mpo
 export product_state, random_state
 
 # Algorithms
-export dmrg_sweep, tdvp_sweep
+export dmrg_sweep, dmrg_sweep_one_site, tdvp_sweep, tdvp_sweep_one_site
 
 # Measurements
 export measure_energy, measure_norm, energy_variance
@@ -61,6 +62,7 @@ export measure_local_observable, measure_correlation
 export make_canonical, is_orthogonal
 export entropy, truncation_error
 export mps_to_vector, mpo_to_matrix
+export pad_mps
 
 # ED: operators
 export embed_operator, embed_two_site, embed_multi_site
