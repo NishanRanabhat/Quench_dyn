@@ -1,0 +1,872 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{braket}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
+\usepackage{listings}
+
+% ── Listings (Julia) ────────────────────────────────────────────────────────
+\definecolor{codebg}{rgb}{0.97,0.97,0.97}
+\definecolor{codekey}{rgb}{0.0,0.0,0.6}
+\definecolor{codestr}{rgb}{0.0,0.4,0.0}
+\definecolor{codecom}{rgb}{0.4,0.4,0.4}
+
+\lstdefinelanguage{Julia}{
+  morekeywords={function,end,struct,abstract,type,if,else,elseif,for,in,while,
+                return,using,import,include,module,const,where,mutable,do,let,
+                begin,Vector,NTuple,Int,Float64,ComplexF64,T,Real,Number,Symbol,
+                Bool,Array,Matrix,Tuple,Dict,nothing,true,false,Val},
+  sensitive=true,
+  morecomment=[l]{\#},
+  morestring=[b]",
+}
+\lstset{
+  language=Julia,
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekey}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codecom}\itshape,
+  breaklines=true,
+  showstringspaces=false,
+  frame=single,
+  framerule=0pt,
+  xleftmargin=0.5em,
+  xrightmargin=0.5em,
+  tabsize=2,
+}
+
+\title{\textbf{Porting Plan: U(1)-Symmetric Tensor Networks for \texttt{Quench\_dyn}}\\
+\large File-by-file specification for charge-conserving DMRG and TDVP\\ on the 1D XXZ chain}
+\author{Nishan Ranabhat}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document specifies, in detail, the porting of the U(1)-symmetric
+tensor-network machinery already implemented in \texttt{KagomeDSF/U1/} to the
+1D XXZ project \texttt{Quench\_dyn}.  The motivation is the quench-dynamics
+study laid out in \texttt{docs/manuscript/XXZ\_phase\_ordering.tex}: reaching
+the regime where the even--odd splitting $\Delta_{\rm eo}(N) \sim e^{-N/\xi}$
+becomes smaller than the random-field-induced mixing requires larger $N$ and
+larger $\Delta$ than dense ED or dense MPS can access.  Exploiting total-$S^z$
+conservation gives a $3\!-\!10\times$ reduction in memory and runtime at fixed
+$\chi$, equivalently a larger effective $\chi$ at fixed cost.  No new
+algorithms are needed; the existing U(1) layer is generic and the only
+project-specific code is a $\sim 300$~LOC XXZ MPO builder.  The plan below
+identifies (i) which files are copied verbatim, (ii) what new native code is
+written, (iii) the test plan against the dense baseline and ED, and
+(iv) the phased order of work.  Implementation is deferred to a separate
+working directory.
+\end{abstract}
+
+\tableofcontents
+
+% ===========================================================================
+\section{Motivation and scope}
+% ===========================================================================
+
+The companion manuscript shows that the late-time N\'eel order following the
+quench
+\[
+  H_i = H_{\rm XXZ}(\Delta_i) - \sum_j h_j\,S_j^z
+  \;\longrightarrow\;
+  H_f = H_{\rm XXZ}(\Delta_f)
+\]
+is parity-controlled: the local magnetization $\langle S_i^z(t)\rangle$ is
+purely a cross-parity matrix element and scales as $\mathcal{O}(h)$ as long as
+the random-field mixing $|\bra{\text{even}} V \ket{\text{odd}}|$ is small
+compared with the even--odd splitting $\Delta_{\rm eo}(N) = 2|t|$.  In the
+deep ordered regime the tunneling between the two N\'eel branches behaves as
+$t \sim J(1/\Delta)^{cN} \sim e^{-N/\xi}$.  Reaching the crossover
+$|v| \gtrsim \Delta_{\rm eo}(N)$ where spontaneous symmetry breaking should
+become visible therefore requires \emph{both} large $\Delta$ and large $N$.
+ED is restricted to $N \lesssim 20$; dense MPS is bottlenecked by the bond
+dimension $\chi$ required to resolve the long-range entanglement built up by
+the post-quench dynamics.
+
+Both $H_i$ and $H_f$ commute with the total magnetization
+$S^z_{\rm tot} = \sum_j S_j^z$, including the disorder term
+$V = -\sum_j h_j S_j^z$, which is diagonal in $S^z$.  The entire protocol
+therefore stays inside the $m=0$ sector (for even $N$), exactly the sector
+that contains the two N\'eel branches $\ket{A}=\ket{\uparrow\downarrow\dots}$
+and $\ket{B}=\ket{\downarrow\uparrow\dots}$.  Restricting MPS/MPO tensors to
+the block-sparse U(1) representation is a strict gain with no physics lost.
+The remaining $\mathbb{Z}_2$ parity inside the $m=0$ sector is left intact as
+an open symmetry one can use as a diagnostic at the analysis stage.
+
+\paragraph{Why a port rather than a rewrite.}
+The U(1) layer already exists at \texttt{/home/nishan/UVA\_postdoc/Research/KagomeDSF/U1/}.
+It was developed for the sawtooth/Kagome strip, which is genuinely harder
+than 1D XXZ (supersites of dimension $4$, MPO bond dimension up to $\chi_{\rm MPO}=5$
+with mixed charge content, two-sublattice geometry).  Of $\sim 6600$ lines of
+Julia, roughly $5400$ are generic block-sparse machinery and only
+$\sim 500$ are sawtooth-specific.  The XXZ chain is a strict subset of that
+geometry: spin-$\tfrac12$ physical sites and a $\chi_{\rm MPO}=5$ bond with the
+same five FSM states (Id-start, $S^+$-pending, $S^-$-pending, $S^z$-pending,
+Id-finish) carrying charges $(0,+2,-2,0,0)$.  The dense XXZ MPO builder
+already in \texttt{Quench\_dyn} (\texttt{src/Builders/xxz\_builder.jl}) uses
+exactly these bond states with the upper-triangular convention, so the U(1)
+projection is mechanical.
+
+\paragraph{Out of scope.}
+This document plans the U(1) port only.  We do \emph{not} remove or modify
+the existing dense code under \texttt{src/}; the dense path remains the
+reference implementation for validation and the small-$N$ workflow.  We do
+\emph{not} change algorithm choices --- the existing DMRG, two-site TDVP, and
+one-site TDVP carry over with the same APIs.  We do \emph{not} add new
+symmetries (parity, $\mathbb{Z}_n$) at this stage; the U(1) layer is already
+written generically over an \texttt{AbstractSymmetry} type and can be
+extended later.
+
+% ===========================================================================
+\section{Symmetry analysis specific to our Hamiltonian}
+% ===========================================================================
+
+\subsection{Conservation of total $S^z$}
+The XXZ Hamiltonian
+\[
+  H_{\rm XXZ} = J\sum_i \bigl(S_i^x S_{i+1}^x + S_i^y S_{i+1}^y\bigr)
+              + \Delta\sum_i S_i^z S_{i+1}^z
+\]
+has $XY$ part $\tfrac{J}{2}\sum_i (S_i^+ S_{i+1}^- + S_i^- S_{i+1}^+)$ which
+flips one spin up and a neighbouring spin down --- total $S^z$ unchanged.
+The Ising part is diagonal in $S^z$, hence commutes trivially.  The disorder
+term $V = -\sum_j h_j S_j^z$ is also diagonal in $S^z$.  Therefore
+\[
+  [H_i, S^z_{\rm tot}] = [H_f, S^z_{\rm tot}] = 0,
+\]
+and the time evolution remains in a fixed magnetization sector throughout
+both the imaginary-time preparation (DMRG) and the real-time quench (TDVP).
+
+\subsection{Charge convention}
+Throughout we use the integer charge
+\[
+  q \;=\; 2S^z \;\in\; \mathbb{Z}.
+\]
+For spin-$\tfrac12$, $\ket{\uparrow} \leftrightarrow q=+1$ and
+$\ket{\downarrow} \leftrightarrow q=-1$.  The action of $S^+$ raises $q$ by
+$+2$; $S^-$ lowers by $-2$; $S^z$ preserves $q$.  This is the TeNPy
+convention adopted by the existing U(1) layer
+(\texttt{KagomeDSF/U1/src/Symmetry/chargeinfo.jl}).
+
+\subsection{Bond charges on the XXZ MPO}
+The dense XXZ MPO in \texttt{Quench\_dyn} uses a $\chi_{\rm MPO}=5$
+upper-triangular bond with the FSM states already documented inline at
+\texttt{src/Builders/xxz\_builder.jl:47--63}:
+\begin{center}
+\begin{tabular}{rlc}
+\toprule
+qindex & FSM state & bond charge $q$ \\
+\midrule
+1 & Id-start \;(no coupling in flight)        & $0$ \\
+2 & $S^+$-placed \;(awaiting $S^-$ to the right) & $+2$ \\
+3 & $S^-$-placed \;(awaiting $S^+$ to the right) & $-2$ \\
+4 & $S^z$-placed \;(awaiting $S^z$ to the right) & $0$ \\
+5 & Id-finish \;(coupling completed)             & $0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+With the U(1) layer's per-tensor rule on the MPO
+$W[w_L, w_R, p, p^*]$,
+\[
+  \zeta_{w_L}\,q_{w_L}
+  + \zeta_{w_R}\,q_{w_R}
+  + \zeta_{p}\,q_{p}
+  + \zeta_{p^*}\,q_{p^*}
+  \;=\; 0,
+  \qquad \zeta = (+1,-1,+1,-1),
+\]
+each non-zero entry of the dense $W$ already constructed by
+\texttt{build\_xxz\_mpo} satisfies the rule.  Two spot checks:
+\begin{itemize}[leftmargin=2em]
+  \item $W[1,2,\uparrow,\downarrow] = (J/2)\,S^+$:
+        $0 - 2 + 1 - (-1) = 0$ \checkmark
+  \item $W[2,5,\downarrow,\uparrow] = S^-$:
+        $+2 - 0 + (-1) - 1 = 0$ \checkmark
+\end{itemize}
+So the U(1) projection of the existing dense MPO is well-defined and the
+``dense-then-\texttt{from\_dense}'' construction used in
+\texttt{KagomeDSF/U1/src/Models/sawtooth.jl} carries over verbatim.
+
+\subsection{The $m=0$ N\'eel branches and what U(1) does \emph{not} resolve}
+Both N\'eel branches $\ket{A}$ and $\ket{B}$ have $S^z_{\rm tot}=0$ for even $N$;
+they live in the same U(1) block.  Parity $P: S^z_j \mapsto -S^z_j$ maps $A
+\leftrightarrow B$ \emph{within} the $m=0$ sector but maps $m \leftrightarrow
+-m$ between sectors --- so parity does not commute with $S^z_{\rm tot}$
+globally.  Inside $m=0$ alone, parity acts as a residual $\mathbb{Z}_2$.  We
+do not enforce it as a symmetry in the tensor structure; the even/odd
+splitting is what we are trying to \emph{resolve}, not symmetrize away.
+
+% ===========================================================================
+\section{Inventory of the existing U(1) layer}
+% ===========================================================================
+
+The U(1) package at \texttt{KagomeDSF/U1/} is self-contained: stdlib only
+(\texttt{LinearAlgebra}, \texttt{Random}, \texttt{Printf}, \texttt{TOML})
+plus \texttt{JLD2} for serialization.  It declares \texttt{TensorOperations}
+in \texttt{Project.toml} but does not actually import it inside the U(1)
+code.  The top-level layout (cf.\ \texttt{KagomeDSF/U1/src/U1.jl}):
+
+\begin{center}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabularx}{\linewidth}{l r X}
+\toprule
+Directory & LOC & Purpose \\
+\midrule
+\texttt{Symmetry/}  & $\sim 900$  & Charge metadata, leg-charge bookkeeping, leg pipes (fusion). \\
+\texttt{Tensor/}    & $\sim 2000$ & \texttt{ChargedTensor} type, dense/charged adapters, linalg, contractions, SVD/QR. \\
+\texttt{MPS/}       & $\sim 1050$ & Environments, canonicalization, generic builders, padding, IO. \\
+\texttt{Algorithms/}& $\sim 1000$ & Effective Hamiltonians, Lanczos, Krylov-exponential, DMRG, TDVP (1- and 2-site). \\
+\texttt{Models/}    & $\sim 500$  & Sawtooth-specific MPO and site builders. \emph{Not portable.} \\
+\texttt{DSF/}       & $\sim 650$  & Spectral-function pipeline. \emph{Not needed for quench dynamics.} \\
+\texttt{ED/}        & $\sim 600$  & Dense ED for sawtooth, validation only. \emph{Not needed.} \\
+\texttt{Parallel/}  & --          & Threaded reimplementations of hot paths. \emph{Optional, post-MVP.} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Key types and conventions to inherit}
+
+\textbf{Charge metadata (\texttt{Symmetry/chargeinfo.jl}).}
+\begin{lstlisting}
+abstract type AbstractSymmetry end
+struct U1Symmetry <: AbstractSymmetry end
+
+struct ChargeInfo{S<:AbstractSymmetry}
+    mod::Int      # 0 for U(1)
+    name::Symbol  # :twice_Sz
+end
+\end{lstlisting}
+
+\textbf{Leg charges (\texttt{Symmetry/legcharge.jl}).}
+\begin{lstlisting}
+struct LegCharge{S<:AbstractSymmetry}
+    chinfo::ChargeInfo{S}
+    charges::Vector{Int}    # one per qindex (block)
+    slices::Vector{Int}     # block boundaries, length nblocks+1
+    qconj::Int8             # +-1
+end
+\end{lstlisting}
+
+\textbf{Block-sparse tensor (\texttt{Tensor/chargedtensor.jl}).}
+\begin{lstlisting}
+struct ChargedTensor{T, N, S<:AbstractSymmetry}
+    legs::NTuple{N, LegCharge{S}}
+    qtotal::Int
+    qdata::Matrix{Int}        # (nblocks_stored, N) of qindices
+    data::Vector{Array{T, N}} # the block contents
+end
+\end{lstlisting}
+
+\textbf{Sign convention (the \emph{single} thing that matters most when porting):}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Tensor & Legs & $\zeta$ \\
+\midrule
+MPS site & $(v_L, p, v_R)$        & $(+1, +1, -1)$ \\
+MPO site & $(w_L, w_R, p, p^*)$   & $(+1, -1, +1, -1)$ \\
+Left env & $(\bar v, w, v)$       & $(+1, -1, -1)$ \\
+Right env& $(\bar v, w, v)$       & $(-1, +1, +1)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+with the per-tensor charge rule
+$\sum_k \zeta_k\,q_{k,\,\text{qidx}[k]} \equiv Q\pmod{\text{mod}}$ for the
+stored qindex tuples.
+
+\subsection{Operations already implemented}
+
+\begin{itemize}[leftmargin=2em]
+\item \textbf{Adapters.} \texttt{from\_dense(A, legs, qtotal; tol)} projects a
+      dense array onto its allowed-sector blocks, warning if discarded mass
+      exceeds \texttt{tol}.  \texttt{to\_dense(t)} inflates back.
+\item \textbf{Linalg.} \texttt{conj}, \texttt{norm}, \texttt{dot}, scalar
+      ops, \texttt{axpby}; everything per-block.
+\item \textbf{Contractions.} \texttt{permute}, block-sparse
+      \texttt{tensordot}, \texttt{combine\_legs}/\texttt{split\_legs} via
+      \texttt{LegPipe}.
+\item \textbf{Decompositions.} \texttt{svd\_charged} with per-block
+      $\sigma$-floor, global sort, relative cutoff, hard cap on $\chi$.
+      \texttt{qr\_charged} for canonicalization.
+\item \textbf{MPS ops.} \texttt{trivial\_left\_env}, \texttt{update\_left\_env},
+      symmetric right-side variants, \texttt{build\_environments},
+      \texttt{make\_canonical!}, orthogonality checks, \texttt{measure\_norm},
+      \texttt{measure\_energy}, \texttt{pad\_mps\_charged} (charge-preserving).
+\item \textbf{Solvers.} \texttt{TwoSiteEffectiveH}, \texttt{OneSiteEffectiveH},
+      \texttt{ZeroSiteEffectiveH}, each with \texttt{\_apply};
+      \texttt{LanczosSolver}, \texttt{KrylovExponential}, each acting
+      directly on \texttt{ChargedTensor}.
+\item \textbf{Algorithms.} \texttt{ChargedMPSState} container,
+      \texttt{dmrg\_sweep!}, \texttt{tdvp\_sweep!} (2-site),
+      \texttt{tdvp\_sweep\_one\_site!} (1-site).
+\end{itemize}
+
+% ===========================================================================
+\section{Target architecture for the port}
+% ===========================================================================
+
+\subsection{Where the new code lives}
+We propose creating a sibling sub-package under \texttt{Quench\_dyn/} that
+mirrors the \texttt{KagomeDSF/U1/} layout:
+\begin{verbatim}
+Quench_dyn/
+  src/                <-- existing dense code, untouched
+  U1/                 <-- NEW sub-package, self-contained
+    Project.toml
+    src/
+      QuenchDynU1.jl  <-- module top, includes everything below
+      Symmetry/       <-- copy from KagomeDSF/U1/src/Symmetry/
+      Tensor/         <-- copy from KagomeDSF/U1/src/Tensor/
+      MPS/            <-- copy from KagomeDSF/U1/src/MPS/
+      Algorithms/     <-- copy from KagomeDSF/U1/src/Algorithms/
+      Models/
+        xxz.jl        <-- NEW (~300 LOC), replaces sawtooth.jl
+    test/
+      ... (copied generic tests + new XXZ tests)
+\end{verbatim}
+This keeps the dense and U(1) code paths fully decoupled.  The existing
+scripts in \texttt{scripts/} continue to work against \texttt{QuenchDyn}; new
+scripts that want U(1) load \texttt{QuenchDynU1} instead.  Once the U(1)
+path is stable we can decide whether to merge them under one umbrella module;
+that is deferred.
+
+\subsection{Why a sub-package and not a flat add}
+Two reasons.  First, it mirrors how \texttt{KagomeDSF/U1/} was structured ---
+proven to work, so we inherit the dependency hygiene for free.  Second, a
+sub-package has its own \texttt{Project.toml} and tests, so the U(1) layer
+can be precompiled and tested independently of the dense code.  This matches
+your modular-architecture preference (no black-box pipelines, every
+operation independent).
+
+\subsection{Renaming considerations during the copy}
+None.  Every type, function, and convention in the U(1) layer is XXZ-agnostic
+already.  The module name (\texttt{U1} vs \texttt{QuenchDynU1}) is the only
+thing that needs to change at the top of \texttt{src/QuenchDynU1.jl}, and
+that is just an edit to the \texttt{module} keyword and the file header.
+
+% ===========================================================================
+\section{Phase A--D: portable layers (copy verbatim)}
+% ===========================================================================
+
+\subsection{Phase A --- Symmetry (3 files)}
+\begin{center}
+\begin{tabularx}{\linewidth}{l r X}
+\toprule
+File & LOC & Notes \\
+\midrule
+\texttt{Symmetry/chargeinfo.jl} & 159 & \texttt{AbstractSymmetry}, \texttt{NoSymmetry}, \texttt{U1Symmetry}, \texttt{ChargeInfo}, \texttt{make\_valid}.  Copy as-is. \\
+\texttt{Symmetry/legcharge.jl}  & $\sim 340$ & \texttt{LegCharge}, \texttt{from\_qflat}, \texttt{from\_trivial}, \texttt{block\_size(s)}, \texttt{slice}, \texttt{charge}, \texttt{findblock}, \texttt{is\_contractible}.  Copy as-is. \\
+\texttt{Symmetry/legpipe.jl}    & $\sim 400$ & \texttt{LegPipe}, \texttt{q\_map}, \texttt{strides}, helpers used by \texttt{combine\_legs}.  Copy as-is. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Phase B --- Tensor (5 files)}
+\begin{center}
+\begin{tabularx}{\linewidth}{l r X}
+\toprule
+File & LOC & Notes \\
+\midrule
+\texttt{Tensor/chargedtensor.jl}  & $\sim 450$ & The \texttt{ChargedTensor\{T,N,S\}} type and unchecked/checked constructors. \\
+\texttt{Tensor/adapters.jl}       & $\sim 250$ & \texttt{validate\_charges}, \texttt{from\_dense}, \texttt{to\_dense}. \\
+\texttt{Tensor/linalg.jl}         & $\sim 200$ & \texttt{conj}, \texttt{copy}, \texttt{norm}, \texttt{dot}, scalar ops, \texttt{axpby}. \\
+\texttt{Tensor/contraction.jl}    & $\sim 600$ & \texttt{permute}, \texttt{tensordot}, \texttt{combine\_legs}, \texttt{split\_legs}. \\
+\texttt{Tensor/decomposition.jl}  & $\sim 500$ & \texttt{svd\_charged}, \texttt{qr\_charged}, truncation policy. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Phase C --- MPS operations (4 files)}
+\begin{center}
+\begin{tabularx}{\linewidth}{l r X}
+\toprule
+File & LOC & Notes \\
+\midrule
+\texttt{MPS/tensorops.jl} & $\sim 450$ & \texttt{trivial\_left\_env}/\texttt{right\_env}, \texttt{update\_left\_env}, symmetric right, \texttt{build\_environments}, \texttt{move\_orthogonality\_*!}, \texttt{make\_canonical!}, \texttt{is\_left/right\_orthogonal}, \texttt{measure\_norm}, \texttt{measure\_energy}. \\
+\texttt{MPS/builders.jl} & $\sim 350$ & Generic \texttt{spin\_half\_leg}, \texttt{trivial\_boundary\_leg}, \texttt{product\_state\_charged}, \texttt{random\_charged\_mps}, \texttt{rand\_charged\_tensor}.  Sawtooth-specific functions (\texttt{sawtooth\_supersite\_leg}, \texttt{sawtooth\_mpo\_bond\_leg}, \texttt{sawtooth\_random\_charged\_mps}, \texttt{sawtooth\_supersite\_operator}) should be deleted on copy --- they belong in \texttt{Models/}.\\
+\texttt{MPS/io.jl}       & $\sim 150$ & \texttt{save\_charged\_mps}, \texttt{load\_charged\_mps}.  Copy as-is. \\
+\texttt{MPS/padding.jl}  & $\sim 100$ & \texttt{pad\_mps\_charged}.  Charge-preserving padding; essential for the 1-site TDVP workflow. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\paragraph{One pruning during copy.}  \texttt{MPS/builders.jl} mixes generic
+constructors with sawtooth supersite helpers.  The split is clean: anything
+named \texttt{sawtooth\_*} goes; anything else is generic and stays.  The
+generic \texttt{product\_state\_charged} takes a physical \texttt{LegCharge}
+and a vector of basis indices --- exactly what we need to construct N\'eel
+states for the XXZ chain (Section~\ref{sec:phase-f}).
+
+\subsection{Phase D --- Algorithms (2 files)}
+\begin{center}
+\begin{tabularx}{\linewidth}{l r X}
+\toprule
+File & LOC & Notes \\
+\midrule
+\texttt{Algorithms/solvers.jl}    & $\sim 450$ & \texttt{EffectiveHamiltonian} hierarchy (zero-/one-/two-site), \texttt{\_apply}, \texttt{LanczosSolver} (\texttt{\_solve}), \texttt{KrylovExponential} (\texttt{\_evolve}). \\
+\texttt{Algorithms/algorithms.jl} & $\sim 550$ & \texttt{ChargedMPSState}, \texttt{dmrg\_sweep!}, \texttt{tdvp\_sweep!} (2-site), \texttt{tdvp\_sweep\_one\_site!}. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\paragraph{API mapping (dense $\to$ U(1)).}
+\begin{center}
+\begin{tabularx}{\linewidth}{l l X}
+\toprule
+Dense (\texttt{QuenchDyn}) & U(1) (\texttt{QuenchDynU1}) & Differences \\
+\midrule
+\texttt{MPS\{T\}}      & \texttt{Vector\{ChargedTensor\{T,3,U1Symmetry\}\}} & No wrapper struct in U(1); a bare \texttt{Vector}. \\
+\texttt{MPO\{T\}}      & \texttt{Vector\{ChargedTensor\{T,4,U1Symmetry\}\}} & Same. \\
+\texttt{Environment\{T\}} & \texttt{Vector\{Union\{Nothing, ChargedTensor\{T,3,U1Symmetry\}\}\}} & Same. \\
+\texttt{MPSState}      & \texttt{ChargedMPSState\{Tmps,Tmpo,Tenv,S\}} & Carries explicit eltypes; same role. \\
+\texttt{DMRGOptions}   & passed as \texttt{(chi\_max, cutoff)} kwargs & U(1) inlines the options into \texttt{dmrg\_sweep!}. \\
+\texttt{TDVPOptions}   & passed as \texttt{(dt, chi\_max, cutoff)} kwargs & Same comment. \\
+\texttt{dmrg\_sweep}   & \texttt{dmrg\_sweep!} & In-place in U(1) (matches existing convention there). \\
+\texttt{tdvp\_sweep}   & \texttt{tdvp\_sweep!} & In-place; otherwise identical sweep mechanics. \\
+\texttt{tdvp\_sweep\_one\_site} & \texttt{tdvp\_sweep\_one\_site!} & Same. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+The \texttt{!} naming difference (mutating in U(1) vs returning new in dense)
+is a real semantic distinction; we keep U(1)'s convention as it is and
+\emph{do not} rewrite the dense routines.
+
+% ===========================================================================
+\section{Phase E --- Native: the XXZ charged MPO}
+\label{sec:phase-e}
+% ===========================================================================
+
+This is the only piece of model-specific code we write.  The strategy
+mirrors \texttt{KagomeDSF/U1/src/Models/sawtooth.jl}: build the dense $W$
+tensors with the existing routine, declare the leg-charge structure, and
+project with \texttt{from\_dense}.
+
+\subsection{File: \texttt{U1/src/Models/xxz.jl}}
+
+\paragraph{Public functions.}
+\begin{lstlisting}
+"""
+    build_xxz_mpo_charged(N, J, Delta, h::Vector{Float64};
+                          T::Type = Float64) -> Vector{ChargedTensor{T,4,U1Symmetry}}
+
+U(1)-charge-conserving XXZ MPO with chi_MPO = 5 and per-site longitudinal
+field h_i. Charge convention: q = 2 S^z. Bond states and charges:
+  [Id-start, S+-pending, S--pending, Sz-pending, Id-finish]
+  charges = [0, +2, -2, 0, 0]
+"""
+function build_xxz_mpo_charged(N::Int, J::Float64, Delta::Float64,
+                               h::Vector{Float64};
+                               T::Type = Float64)
+end
+
+# Convenience overloads mirroring the dense API:
+build_xxz_mpo_charged(N, J, Delta, h_uniform::Float64; T=Float64)
+build_xxz_mpo_charged(N, J, Delta;                       T=Float64)
+\end{lstlisting}
+
+\paragraph{Leg constructors.}
+\begin{lstlisting}
+"""Physical spin-1/2 leg with charges (+1, -1). Bunched (no degeneracy)."""
+xxz_phys_leg(ci::ChargeInfo{U1Symmetry}; qconj=+1) =
+    LegCharge(ci, [(+1, 1), (-1, 1)], qconj)
+
+"""chi_MPO = 5 XXZ bond leg in unbunched form: five qindices, each dim 1,
+charges (0, +2, -2, 0, 0) corresponding to the FSM states above."""
+xxz_mpo_bond_leg(ci::ChargeInfo{U1Symmetry}; qconj=+1) =
+    LegCharge(ci, [0, +2, -2, 0, 0], [1, 2, 3, 4, 5, 6], qconj)
+\end{lstlisting}
+The bunched physical leg \texttt{xxz\_phys\_leg} is essentially an alias of
+the existing generic \texttt{spin\_half\_leg} from \texttt{MPS/builders.jl}.
+Defining it locally inside \texttt{Models/xxz.jl} keeps the XXZ vocabulary
+self-contained and avoids reaching into the generic namespace from physics
+code.  Bunching the three q=0 bond states (states 1, 4, 5) is a $\sim 1.5\times$
+speedup on $W$-block contractions; the sawtooth blueprint explicitly leaves
+this as a post-MVP refinement, so we follow the same policy and keep the
+five states unbunched in the initial port.
+
+\paragraph{MPO assembly (pseudocode).}
+\begin{lstlisting}
+function build_xxz_mpo_charged(N, J, Delta, h::Vector{Float64};
+                               T::Type = Float64)
+    @assert length(h) == N
+    @assert N >= 2
+
+    # 1. Dense reference: reuse Quench_dyn's existing builder.
+    W_dense = QuenchDyn.build_xxz_mpo(N, J, Delta, h; T = T).tensors
+    # W_dense is a Vector of 4-arrays sized (chi_l, chi_r, d, d), with
+    # boundary tensors already sliced to (1, 5, d, d) and (5, 1, d, d).
+
+    # 2. Leg structure.
+    ci             = ChargeInfo{U1Symmetry}(0, :twice_Sz)
+    phys           = xxz_phys_leg(ci)
+    bond_boundary  = trivial_boundary_leg(ci)    # dim-1, q = 0
+    bond_bulk      = xxz_mpo_bond_leg(ci)
+
+    legs_first = (bond_boundary, conj(bond_bulk), phys, conj(phys))
+    legs_bulk  = (bond_bulk,     conj(bond_bulk), phys, conj(phys))
+    legs_last  = (bond_bulk,     conj(bond_boundary), phys, conj(phys))
+
+    # 3. Project to U(1) blocks. Every non-zero entry of the dense W
+    # satisfies the charge rule, so discarded mass should be ~0
+    # (warn threshold = 1e-12).
+    mpo = Vector{ChargedTensor{T, 4, U1Symmetry}}(undef, N)
+    mpo[1] = from_dense(W_dense[1], legs_first, 0)
+    for i in 2:(N - 1)
+        mpo[i] = from_dense(W_dense[i], legs_bulk, 0)
+    end
+    mpo[N] = from_dense(W_dense[N], legs_last, 0)
+    return mpo
+end
+\end{lstlisting}
+
+\paragraph{Per-site vs shared tensors.}  Site-dependent $h_i$ means we
+cannot share the same \texttt{bulk} tensor across sites (as the sawtooth
+builder does); each site needs its own \texttt{from\_dense} call.  This is
+fine --- the dense XXZ builder already constructs $N$ distinct tensors.  For
+the special case $h_i \equiv h_0$ (uniform field) one could share a single
+bulk \texttt{ChargedTensor} reference, but the memory saving is negligible
+($\chi_{\rm MPO}=5$, $d=2$ means each $W$ is at most $5 \cdot 5 \cdot 4 = 100$
+floats).  We do not optimize this.
+
+\paragraph{Cross-dependency note.}  The pseudocode above shows \texttt{QuenchDynU1.build\_xxz\_mpo\_charged}
+calling \texttt{QuenchDyn.build\_xxz\_mpo} to reuse the dense $W$ tensors.
+This introduces a one-way dependency \texttt{QuenchDynU1 $\to$ QuenchDyn}.
+If we want \texttt{QuenchDynU1} to be standalone (mirroring how
+\texttt{KagomeDSF/U1} is standalone) we should instead inline the
+dense $W$ construction --- $\sim 50$ LOC --- into \texttt{Models/xxz.jl}.
+Recommendation: inline.  It removes the cross-dep, the code is small, and the
+two builders can diverge in future without coupling.
+
+% ===========================================================================
+\section{Phase F --- Native: N\'eel state and quench-protocol initialisers}
+\label{sec:phase-f}
+% ===========================================================================
+
+\paragraph{N\'eel product state in the $m=0$ sector.}
+\begin{lstlisting}
+"""
+    xxz_neel_state(::Type{T}, N::Int; start_up::Bool = true)
+        -> Vector{ChargedTensor{T, 3, U1Symmetry}}
+
+The charge-conserving Neel product state in the m = 0 sector of the
+spin-1/2 chain. start_up = true gives |up dn up dn ...>, false gives
+|dn up dn up ...>. Requires even N.
+"""
+function xxz_neel_state(::Type{T}, N::Int; start_up::Bool = true) where T
+    iseven(N) || throw(ArgumentError(
+        "xxz_neel_state needs even N for m = 0; got N = $N."))
+    ci   = ChargeInfo{U1Symmetry}(0, :twice_Sz)
+    phys = xxz_phys_leg(ci)
+    # phys basis indices: 1 = up (q=+1), 2 = dn (q=-1)
+    indices = start_up ? [iseven(i) ? 2 : 1 for i in 1:N] :
+                         [iseven(i) ? 1 : 2 for i in 1:N]
+    return product_state_charged(T, phys, indices)
+end
+\end{lstlisting}
+The two N\'eel branches $\ket{A}$ and $\ket{B}$ in the manuscript correspond
+to \texttt{start\_up = true} and \texttt{false} respectively.
+
+\paragraph{Random charged MPS in a target sector.}
+We expose a thin wrapper around the existing generic constructor:
+\begin{lstlisting}
+"""
+    xxz_random_charged_mps(::Type{T}, N::Int, chi::Int;
+                           qtotal::Int = 0) -> Vector{ChargedTensor{T,3,U1Symmetry}}
+
+Random charge-conserving spin-1/2 MPS with total charge qtotal (q = 2*S^z_tot).
+Used for initial DMRG warm starts and as a richer-than-product seed for
+benchmarking convergence.
+"""
+function xxz_random_charged_mps(::Type{T}, N::Int, chi::Int;
+                                qtotal::Int = 0) where T
+    ci   = ChargeInfo{U1Symmetry}(0, :twice_Sz)
+    phys = xxz_phys_leg(ci)
+    return random_charged_mps(T, phys, N, chi; qtotal = qtotal)
+end
+\end{lstlisting}
+
+\paragraph{Local operators for measurements.}
+\begin{lstlisting}
+"""Single-site operator as a (2,2) dense matrix, embedded later
+   via apply_local_operator_charged or measure_local_observable."""
+xxz_local_op(symbol::Symbol; T = Float64) =
+    Dict(:Z => T[0.5 0; 0 -0.5],
+         :X => T[0 0.5; 0.5 0],
+         :Sp => T[0 1; 0 0], :Sm => T[0 0; 1 0],
+         :I => T[1 0; 0 1])[symbol]
+\end{lstlisting}
+Note that $S^z$ and $S^x$ are charge-diagonal (preserve $q$) and
+charge-changing ($\Delta q = \pm 2$) respectively.  $\langle S^z(t)\rangle$
+is the only observable the manuscript needs and is fully accessible in
+sector-conserving form.
+
+% ===========================================================================
+\section{Module integration and exports}
+% ===========================================================================
+
+\paragraph{New module file: \texttt{U1/src/QuenchDynU1.jl}.}
+\begin{lstlisting}
+module QuenchDynU1
+
+using LinearAlgebra
+using Random
+using JLD2
+
+include("Symmetry/chargeinfo.jl")
+include("Symmetry/legcharge.jl")
+include("Symmetry/legpipe.jl")
+
+include("Tensor/chargedtensor.jl")
+include("Tensor/adapters.jl")
+include("Tensor/linalg.jl")
+include("Tensor/contraction.jl")
+include("Tensor/decomposition.jl")
+
+include("MPS/tensorops.jl")
+include("MPS/builders.jl")
+include("MPS/io.jl")
+include("MPS/padding.jl")
+
+include("Algorithms/solvers.jl")
+include("Algorithms/algorithms.jl")
+
+include("Models/xxz.jl")
+
+# -- exports (the only XXZ-specific ones) -----------------------------
+export xxz_phys_leg, xxz_mpo_bond_leg
+export build_xxz_mpo_charged
+export xxz_neel_state, xxz_random_charged_mps, xxz_local_op
+
+# (plus the generic exports identical to U1.jl's, minus DSF/Models/ED ones)
+
+end # module
+\end{lstlisting}
+
+\paragraph{\texttt{Project.toml}.}  Copy from \texttt{KagomeDSF/U1/Project.toml},
+change \texttt{name} to \texttt{QuenchDynU1}, allocate a fresh UUID.  Drop
+\texttt{TensorOperations} from \texttt{[deps]} since the U(1) code does not
+actually use it.  Keep \texttt{JLD2}, \texttt{TOML} (for any future config
+loaders).
+
+% ===========================================================================
+\section{Validation plan}
+% ===========================================================================
+
+The U(1) layer carries its own test suite at \texttt{KagomeDSF/U1/test/}.
+We copy it (renaming where it references \texttt{U1} as a module name), then
+\emph{add} XXZ-specific tests.
+
+\subsection{Inherited generic tests (copy + rename)}
+\begin{center}
+\begin{tabularx}{\linewidth}{l X}
+\toprule
+File & What it checks \\
+\midrule
+\texttt{test\_chargeinfo.jl}    & \texttt{make\_valid}, U(1) vs $\mathbb{Z}_n$ edge cases. \\
+\texttt{test\_legcharge.jl}     & Constructors, \texttt{is\_contractible}, \texttt{conj}, \texttt{slice}. \\
+\texttt{test\_legpipe.jl}       & \texttt{q\_map} consistency, fusion-of-fusions. \\
+\texttt{test\_chargedtensor.jl} & Class invariants, accessors, constructor validation. \\
+\texttt{test\_adapters.jl}      & \texttt{to\_dense $\circ$ from\_dense} round-trip; off-sector projection mass. \\
+\texttt{test\_linalg.jl}        & \texttt{norm}, \texttt{dot}, scalar mul, \texttt{axpby}. \\
+\texttt{test\_contraction.jl}   & \texttt{tensordot} vs dense, \texttt{combine/split\_legs} round-trip. \\
+\texttt{test\_decomposition.jl} & \texttt{svd\_charged} vs dense SVD, truncation policy. \\
+\texttt{test\_tensorops.jl}     & Env build / update consistency; orthogonality after \texttt{make\_canonical!}. \\
+\texttt{test\_solvers.jl}       & Lanczos ground state vs dense; Krylov-exp vs dense \texttt{exp(-iHt)}. \\
+\texttt{test\_algorithms.jl}    & End-to-end DMRG/TDVP on a small generic Heisenberg-like Hamiltonian. \\
+\texttt{test\_builders.jl}      & \texttt{product\_state\_charged}, \texttt{random\_charged\_mps} (after pruning sawtooth bits). \\
+\texttt{test\_io.jl}            & JLD2 round-trip. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{New XXZ-specific tests}
+
+\paragraph{\texttt{test\_xxz\_mpo\_charged.jl}.}
+\begin{enumerate}[leftmargin=2em]
+  \item For $N \in \{4, 6, 8\}$, $\Delta \in \{0.5, 1.0, 2.0\}$,
+        random $h_j$ with $|h_j| \le 0.1$, and uniform $h$:
+        verify \texttt{to\_dense(build\_xxz\_mpo\_charged(...)) == build\_xxz\_mpo(...).tensors[i]}
+        block by block, to tolerance $10^{-12}$.
+  \item Verify \texttt{validate\_charges} passes on every site.
+  \item Verify the discarded mass returned by \texttt{from\_dense} is $< 10^{-13}$.
+\end{enumerate}
+
+\paragraph{\texttt{test\_xxz\_dmrg\_charged.jl}.}
+\begin{enumerate}[leftmargin=2em]
+  \item For $N=8$, several $\Delta$:
+        run \texttt{dmrg\_sweep!} starting from \texttt{xxz\_neel\_state}.
+        Compare ground-state energy against:
+        \begin{itemize}
+          \item dense DMRG (\texttt{QuenchDyn.dmrg\_sweep}), and
+          \item ED (\texttt{build\_xxz\_hamiltonian} + \texttt{diagonalize}),
+        \end{itemize}
+        to $10^{-8}$ at $\chi=32$.
+  \item Verify total charge is conserved exactly across all sweeps
+        (\texttt{qtotal == 0} on the active site).
+\end{enumerate}
+
+\paragraph{\texttt{test\_xxz\_tdvp\_charged.jl}.}
+\begin{enumerate}[leftmargin=2em]
+  \item Trotter quench on $N=8$: prepare ground state of $H_i(\Delta_i=0.5, h)$,
+        evolve under $H_f(\Delta_f=2.0)$ for $t \in [0, 5]$ at $dt=0.05$.
+        Compare $\langle S_i^z(t)\rangle$ profiles vs ED (\texttt{ed\_evolve\_and\_measure}),
+        to $10^{-6}$ at $\chi=64$.
+  \item Compare against dense TDVP (\texttt{QuenchDyn.tdvp\_sweep}) at same parameters;
+        verify agreement to $10^{-8}$.
+  \item Check norm preservation in 1-site TDVP (should be machine precision).
+  \item Check energy drift in 2-site TDVP (should match dense baseline).
+\end{enumerate}
+
+\paragraph{\texttt{test\_quench\_protocol\_charged.jl}.}
+\begin{enumerate}[leftmargin=2em]
+  \item Reproduce the manuscript's Fig.~1/2 setup on $N=12$ (still ED-comparable):
+        DMRG with $h_j$ disorder, quench to clean $H_f$, evolve, plot
+        $\langle S_i^z(t)\rangle$ and compare ED-style profile.
+        This is a smoke test for the full protocol, not a unit test.
+\end{enumerate}
+
+\subsection{Drift benchmarks}
+Mirror the existing \texttt{tests/benchmark\_tdvp\_drift.jl} for the U(1)
+path.  We expect (i) lower memory at the same $\chi$ and (ii) the same
+qualitative drift behaviour --- the U(1) layer does not change the
+truncation policy, so 2-site TDVP still loses norm via SVD and 1-site TDVP
+still preserves it.
+
+% ===========================================================================
+\section{Open questions and risks}
+% ===========================================================================
+
+\subsection{MPO convention drift}
+The XXZ MPO in \texttt{Quench\_dyn} uses the upper-triangular FSM
+convention; the sawtooth MPO in \texttt{KagomeDSF/U1} also uses an
+upper-triangular form, but the dense reference in \texttt{KagomeDSF}'s
+non-U(1) builder is lower-triangular.  This was a real bug source there
+(\texttt{docs/mpo\_convention\_fix.md} discusses it).  Our path is safer:
+we only invoke the U(1) projection on tensors produced by our own
+\texttt{build\_xxz\_mpo}, whose convention is documented and consistent.
+\textbf{Action:} during Phase E, the very first thing to check is that
+\texttt{from\_dense} returns the expected non-zero qindex tuples on a
+single bulk site (\texttt{nblocks\_stored == 9} for the XXZ $W$:
+1 identity-diagonal entry on each of the three q=0 bond pairs, plus
+$\{(2,5),(3,5),(4,5)\}$ on the right column, plus
+$\{(1,2),(1,3),(1,4)\}$ in the first row).
+
+\subsection{Padding compatibility for 1-site TDVP}
+The dense 1-site routines in \texttt{Quench\_dyn} cannot grow $\chi$ and
+require padding from a 2-site warm start.  In the U(1) case, padding must
+preserve charge sectors --- the existing \texttt{pad\_mps\_charged} in
+\texttt{KagomeDSF/U1/src/MPS/padding.jl} already does this.  \textbf{Action:}
+test \texttt{xxz\_neel\_state $\to$ pad\_mps\_charged $\to$ 1-site DMRG}
+end-to-end as part of Phase F.
+
+\subsection{Numerical type uniformity}
+The U(1) layer parameterises tensors over the element type \texttt{T}.
+For real-time TDVP we will need \texttt{T = ComplexF64}.  DMRG can use
+\texttt{Float64}.  The transition from a real DMRG ground state to complex
+TDVP evolution happens by widening the type when we build the post-quench
+state --- the dense code handles this implicitly; in the U(1) port we may
+need an explicit \texttt{convert\_eltype} helper.  \textbf{Action:} verify
+on a small case during Phase D--E.
+
+\subsection{Performance expectations}
+For 1D spin-$\tfrac12$ XXZ in the $m=0$ sector, the typical U(1) speedup
+factor over dense MPS is $3\!-\!5\times$ in both memory and per-sweep time
+at fixed $\chi$.  At fixed cost, that translates to a factor $\sim\sqrt{3}$
+to $\sqrt{5}$ in effective $\chi$ --- enough to reach noticeably larger
+$N$ in the ordered regime, but not orders of magnitude.  \textbf{Reality
+check:} if the symmetry-broken regime in the manuscript demands
+$\chi \sim 10^3\!-\!10^4$, the U(1) port alone may not be sufficient; we
+would then also need block-aware threading
+(\texttt{Parallel/} sub-package, currently out of scope) or a different
+algorithm (controlled-bond-expansion TDVP, basis transformation).  This is
+a decision for after we have measured concrete performance.
+
+\subsection{Bunching the $q=0$ bond states}
+The five XXZ MPO bond states include three with $q=0$ (Id-start, Sz-pending,
+Id-finish).  They could be bunched into a single qindex of dimension 3,
+halving the number of off-diagonal blocks the contractor walks through.  The
+sawtooth blueprint defers this to ``post-MVP''.  We follow the same policy:
+get correctness first with five unbunched qindices, profile, then bunch if
+the speedup is meaningful.
+
+% ===========================================================================
+\section{Phased schedule}
+% ===========================================================================
+
+\begin{center}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\linewidth}{c X l}
+\toprule
+Phase & Deliverable & Estimate \\
+\midrule
+0 & Create \texttt{Quench\_dyn/U1/} skeleton, \texttt{Project.toml}, empty \texttt{QuenchDynU1.jl}. & 0.5 d \\
+A & Copy \texttt{Symmetry/} (3 files).  Run \texttt{test\_chargeinfo.jl}, \texttt{test\_legcharge.jl}, \texttt{test\_legpipe.jl}. & 0.5 d \\
+B & Copy \texttt{Tensor/} (5 files).  Run \texttt{test\_chargedtensor.jl}, \texttt{test\_adapters.jl}, \texttt{test\_linalg.jl}, \texttt{test\_contraction.jl}, \texttt{test\_decomposition.jl}. & 1 d \\
+C & Copy \texttt{MPS/} (4 files), prune sawtooth helpers from \texttt{builders.jl}.  Run \texttt{test\_tensorops.jl}, \texttt{test\_builders.jl}, \texttt{test\_io.jl}. & 1 d \\
+D & Copy \texttt{Algorithms/} (2 files).  Run \texttt{test\_solvers.jl}, \texttt{test\_algorithms.jl} on a generic Heisenberg test. & 1 d \\
+E & Write \texttt{Models/xxz.jl}, \texttt{build\_xxz\_mpo\_charged}, leg helpers. Add \texttt{test\_xxz\_mpo\_charged.jl}. & 1--1.5 d \\
+F & Add \texttt{xxz\_neel\_state}, \texttt{xxz\_random\_charged\_mps}, local-op helper.  Add \texttt{test\_xxz\_dmrg\_charged.jl}.  Confirm DMRG ground state vs dense and ED on $N=8$. & 1 d \\
+G & Add \texttt{test\_xxz\_tdvp\_charged.jl}: 2-site TDVP quench vs dense and ED on $N=8$ and $N=12$. & 1--1.5 d \\
+H & Padding $+$ 1-site TDVP path: \texttt{pad\_mps\_charged} round-trip, then 1-site TDVP smoke test. & 0.5 d \\
+I & End-to-end protocol script reproducing manuscript Fig.~1/2 setup on $N=16$ (out of ED reach) at moderate $\chi$.  Visual comparison of $\langle S_i^z(t)\rangle$ vs dense TDVP. & 1 d \\
+J & Drift benchmark: \texttt{benchmark\_tdvp\_drift\_charged.jl} mirroring the dense one. & 0.5 d \\
+\midrule
+& \textbf{Total} & $\sim 9\!-\!11$ working days \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The phasing is intentionally bottom-up: every layer is tested independently
+before the next is added.  Phases A--D consist almost entirely of copy and
+test execution; Phase E is the only design work (the XXZ MPO charged
+builder, $\sim 100$ LOC of actual code plus $\sim 200$ LOC of tests and
+docstrings).  Phases F--J are integration and validation.
+
+% ===========================================================================
+\section{What this plan does \emph{not} commit to}
+% ===========================================================================
+
+\begin{itemize}[leftmargin=2em]
+  \item Replacing the dense code under \texttt{src/}.  The dense path stays
+        as the small-$N$ reference and is what the existing tests and scripts
+        consume.  Both paths coexist.
+  \item Enforcing the residual $\mathbb{Z}_2$ parity in the m=0 sector.  As
+        argued in the manuscript, parity is what we want to \emph{resolve};
+        baking it into the tensor structure would defeat the purpose.
+  \item Multi-threaded execution (\texttt{Parallel/} sub-package in the
+        sawtooth code).  Deferred until the serial U(1) path proves
+        insufficient.
+  \item Bunching the $q=0$ MPO bond states.  Deferred until profiling
+        warrants it.
+  \item Spectral-function / DSF infrastructure.  Not needed for the quench
+        manuscript; the \texttt{DSF/} sub-package is left in
+        \texttt{KagomeDSF/U1/}.
+\end{itemize}
+
+% ===========================================================================
+\section{Summary}
+% ===========================================================================
+
+The U(1) port consists of $\sim 5400$ lines of generic block-sparse machinery
+copied verbatim from \texttt{KagomeDSF/U1/}, plus $\sim 300$ lines of native
+XXZ-specific code (\texttt{build\_xxz\_mpo\_charged} and helpers).  The MPO
+charge structure is determined by the existing $\chi_{\rm MPO}=5$ FSM with
+bond charges $(0,+2,-2,0,0)$, and the construction reduces mechanically to
+``build dense $W$, project with \texttt{from\_dense}''.  No new algorithms
+are needed; \texttt{dmrg\_sweep!}, \texttt{tdvp\_sweep!}, and
+\texttt{tdvp\_sweep\_one\_site!} carry over with identical sweep mechanics.
+Validation pairs every new path against both the existing dense baseline
+and ED on small $N$.  Estimated effort: $\sim 10$ working days from
+skeleton to a working end-to-end quench protocol script at $N=16$ outside
+ED reach.
+
+\end{document}

@@ -1,0 +1,296 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{braket}
+\usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
+\usepackage{graphicx}
+
+\title{\textbf{Quench Dynamics of the 1D XXZ Model}\\
+\large Finite-Size Parity Structure and Symmetry-Broken States}
+
+\author{Ho Jang}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Weak random field and finite-size ED}
+
+Consider the XXZ chain with a weak random field only in the initial Hamiltonian,
+\begin{align}
+    H_i = H_{\rm XXZ}(\Delta_i) + V,
+    \qquad
+    V=-\sum_j h_j S_j^z ,
+    \qquad
+    |h_j|\ll 1 .
+\end{align}
+After preparing the ground state of $H_i$, the system evolves with the clean final
+Hamiltonian
+\begin{align}
+    H_f = H_{\rm XXZ}(\Delta_f).
+\end{align}
+The clean XXZ Hamiltonian has the global spin-flip symmetry
+\begin{align}
+    P H_{\rm XXZ} P^\dagger = H_{\rm XXZ},
+    \qquad
+    P S_j^z P^\dagger = -S_j^z .
+\end{align}
+Therefore finite-size ED eigenstates can be chosen as parity eigenstates, not particular symmetry broken state.
+
+\section{Initial state}
+
+Let $\ket{GS_i^+}$ be the even-parity ground state of the clean initial Hamiltonian.
+Since the random field is parity odd,
+\begin{align}
+    P V P^\dagger = -V ,
+\end{align}
+it mixes the even ground state with odd-parity states which will be represented as $\ket{k^-}$. To first order when the state is non-degenerate(well-defined denominator), 
+\begin{align}
+    \ket{\psi(0)}
+    \simeq
+    \ket{GS_i^+}
+    +
+    \sum_{k^-}
+    \frac{\bra{k^-}V\ket{GS_i^+}}
+    {E_{GS_i}^+-E_k^-}
+    \ket{k^-}.
+    \label{eq:initial_state}
+\end{align}
+If $V \ll 1$ with weak random field magnitude, the odd-sector weight is small. In this case, the initial state is not a fully symmetry-broken N\'eel state. It is mostly
+the even-parity state plus a small odd-parity correction. For $\Delta_i\leq 1$, the initial state is not in the ordered Ising regime.
+
+\section{After the quench}
+
+The final Hamiltonian also preserves parity. Expanding the initial state in the eigenbasis
+of $H_f$,
+\begin{align}
+    \ket{\psi(0)}
+    =
+    \sum_n c_n^+ \ket{n^+}
+    +
+    \sum_m c_m^- \ket{m^-},
+\end{align}
+with
+\begin{align}
+    c_n^+ = O(1),
+    \qquad
+    c_m^- = O(h).
+\end{align}
+The time-evolved state is
+\begin{align}
+    \ket{\psi(t)}
+    =
+    \sum_n c_n^+ e^{-iE_n^+t}\ket{n^+}
+    +
+    \sum_m c_m^- e^{-iE_m^-t}\ket{m^-}.
+\end{align}
+
+Since $S_i^z$ is parity odd, same-parity matrix elements vanish:
+\begin{align}
+    \bra{n^+}S_i^z\ket{n'^+}=0,
+    \qquad
+    \bra{m^-}S_i^z\ket{m'^-}=0.
+\end{align}
+Therefore,
+\begin{align}
+    \langle S_i^z(t)\rangle
+    =
+    2\,{\rm Re}
+    \sum_{n,m}
+    (c_n^+)^*c_m^-
+    \bra{n^+}S_i^z\ket{m^-}
+    e^{i(E_n^+-E_m^-)t}.
+    \label{eq:local_sz}
+\end{align}
+
+This equation explains the ED result. The matrix element
+\begin{align}
+    \bra{n^+}S_i^z\ket{m^-}
+\end{align}
+can contain the N\'eel spatial structure, but the amplitude is controlled by
+\begin{align}
+    (c_n^+)^*c_m^- \sim O(h).
+\end{align}
+Thus, for a perturbative initial random field, the magnetization scale along it, which is shown in Fig.~\ref{fig:ed-xxz}.
+\begin{align}
+    \boxed{
+    \langle S_i^z(t)\rangle \sim O(h)
+    } .
+\end{align}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.99\linewidth]{benchmark-two-site-tdvp/ED-xxz-quench.pdf}
+    \caption{XXZ quench with $\Delta_i=0.5$ with random magnetic field to $\Delta_f = 2.0$ without external magnetic field. The strength of Neel order depends on the initial random disorder under perturbative consideration.}
+    \label{fig:ed-xxz}
+\end{figure}
+
+\section{TDVP result}
+Here I compare ED and TDVP using the same quench protocol and the same random-field seed. 
+For finite initial random-field strength, the agreement is good, as shown in Fig.~\ref{fig:tdvp-xxz}.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.99\linewidth]{benchmark-two-site-tdvp/TDVP-xxz-quench.pdf}
+    \caption{
+    TDVP result under the same condition as ED, using the same random-field seed. 
+    The finite-field cases show consistent magnetization scales between ED and TDVP.
+    }
+    \label{fig:tdvp-xxz}
+\end{figure}
+
+This suggests that both ED and TDVP capture the same parity-controlled response in this regime.
+
+
+
+
+\section{Symmetry-broken state}
+
+In nature, one of the two N\'eel branches is selected in the ordered regime. \textbf{I think large $\Delta_f$, $N$ can break symmetry.}
+
+%In small-size ED, however, the clean Hamiltonian still preserves the global spin-flip
+%symmetry, so the exact low-energy states are parity eigenstates rather than explicitly
+%symmetry-broken states.
+
+Let
+\begin{align}
+    \ket{A}
+    =
+    \ket{\uparrow\downarrow\uparrow\downarrow\cdots},
+    \qquad
+    \ket{B}
+    =
+    \ket{\downarrow\uparrow\downarrow\uparrow\cdots}
+\end{align}
+denote the two N\'eel-like branches. For a finite clean system under parity symmetry, the corresponding low-energy
+states are approximately
+\begin{align}
+    \ket{\rm even}
+    =
+    \frac{1}{\sqrt{2}}
+    \left(
+    \ket{A}
+    +
+    \ket{B}
+    \right),
+    \qquad
+    \ket{\rm odd}
+    =
+    \frac{1}{\sqrt{2}}
+    \left(
+    \ket{A}
+    -
+    \ket{B}
+    \right).
+\end{align}
+If $\ket{A}$ and $\ket{B}$ were completely disconnected, these two states would be exactly
+degenerate. In a finite quantum system, however, quantum fluctuations weakly connect the
+two branches. Restricting to the subspace spanned by $\ket{A}$ and $\ket{B}$, the effective
+Hamiltonian can be written as
+\begin{align}
+    H_{\rm eff}
+    =
+    \begin{pmatrix}
+        E_0 & t \\
+        t & E_0
+    \end{pmatrix},
+    \label{eq:two_state_heff}
+\end{align}
+where $t$ is the finite-size tunneling amplitude between the two N\'eel branches. 
+Diagonalizing this two-state Hamiltonian gives the even--odd energy splitting
+\begin{align}
+    |\Delta_{\rm eo}(N)|
+    =
+    |E_{\rm odd}-E_{\rm even}|
+    =
+    2|t|.
+\end{align}
+The transverse part of hamiltonian acts only locally,
+\begin{align}
+    H_\perp
+    =
+    \frac{J}{2}
+    \sum_i
+    \left(
+        S_i^+S_{i+1}^-
+        +
+        S_i^-S_{i+1}^+
+    \right).
+\end{align} 
+One application of $H_\perp$ cannot convert $\ket{A}$ into
+$\ket{B}$. Instead, it creates a local defect, or equivalently a pair of domain
+walls. Further local flips move these domain walls through the chain. Only after
+a sequence of $O(N)$ local virtual processes can the system connect the two
+N\'eel branches.
+
+Schematically,
+\begin{align}
+    \ket{A}
+    \rightarrow
+    \ket{\text{domain-wall state}}
+    \rightarrow
+    \ket{\text{domain wall moved}}
+    \rightarrow
+    \cdots
+    \rightarrow
+    \ket{B}.
+\end{align}
+Each intermediate domain-wall configuration costs an Ising energy of order
+\begin{align}
+    \Delta_{\rm DW} \sim J\Delta,
+\end{align}
+while each local spin-exchange matrix element is of order $J$. Therefore each
+virtual step contributes a small factor
+\begin{align}
+    \frac{J}{\Delta_{\rm DW}}
+    \sim
+    \frac{1}{\Delta}.
+\end{align}
+Since the number of required local steps grows with system size, the tunneling
+amplitude behaves schematically as
+\begin{align}
+    t
+    \sim
+    J
+    \left(
+        \frac{1}{\Delta}
+    \right)^{cN},
+\end{align}
+where $c$ is an order-one constant depending on boundary conditions and the
+precise tunneling path. Thus
+\begin{align}
+    t
+    \sim
+    e^{-N/\xi},
+\end{align}
+with a short correlation length $\xi$ in the deep ordered regime. Therefore the even--odd splitting becomes exponentially small with system size. 
+
+This also clarifies when the previous non-degenerate perturbation theory breaks down.
+The random field couples the even and odd states through
+\begin{align}
+    v
+    =
+    \bra{\rm even}
+    V
+    \ket{\rm odd}.
+\end{align}
+If
+\begin{align}
+    |v| \ll |\Delta_{\rm eo}(N)|,
+\end{align}
+then the random field only weakly mixes the odd sector, and the local magnetization remains
+perturbative. If instead
+\begin{align}
+    |v| \gtrsim |\Delta_{\rm eo}(N)|,
+\end{align}
+then the random field is nonperturbative within the lowest even--odd subspace. In that
+case, the state becomes closer to one of the two symmetry-broken branches, $\ket{A}$ or
+$\ket{B}$.
+
+This is why \textbf{increasing $N,\Delta$} can help TDVP/DMRG show a symmetry-broken profile. Under the existence of initial random disorder, as $N,\Delta$
+increases, the even--odd splitting becomes very small, so a tiny physical or numerical bias
+can select one low-entanglement N\'eel branch. However, larger N, we can't explore with ED. So we need TDVP.
+\end{document}
