@@ -25,12 +25,21 @@ include("Algorithms/tdvp.jl")
 include("Builders/mpobuilder.jl")
 include("Builders/mpsbuilder.jl")
 include("Builders/xxz_builder.jl")
+include("Builders/purification.jl")
+
+# ── Finite-T purification (imaginary-time TDVP) ────────────────────────────
+include("Algorithms/purification_tdvp.jl")
 
 # ── Exact Diagonalization ─────────────────────────────────────────────
 include("ED/operators.jl")
 include("ED/hamiltonian.jl")
+include("ED/sectors.jl")
 include("ED/eigensolver.jl")
 include("ED/observables.jl")
+include("ED/thermal.jl")
+
+# ── Analysis ──────────────────────────────────────────────────────────────
+include("Analysis/coarsening.jl")
 
 # ── Exports ───────────────────────────────────────────────────────────────
 
@@ -57,6 +66,7 @@ export dmrg_sweep, dmrg_sweep_one_site, tdvp_sweep, tdvp_sweep_one_site
 # Measurements
 export measure_energy, measure_norm, energy_variance
 export measure_local_observable, measure_correlation
+export measure_local_profile, measure_correlation_matrix
 
 # TensorOps
 export make_canonical, is_orthogonal
@@ -71,6 +81,9 @@ export basis_state, neel_state
 # ED: hamiltonian
 export build_xxz_hamiltonian
 
+# ED: magnetization sectors
+export SzSector, sz_sector, build_xxz_hamiltonian_sector
+
 # ED: eigensolver
 export EDEigensystem, diagonalize, ground_state, low_energy_states
 
@@ -78,5 +91,17 @@ export EDEigensystem, diagonalize, ground_state, low_energy_states
 export ed_expectation, ed_local_expectation, ed_correlation
 export ed_local_profile, ed_correlation_matrix
 export ed_time_evolve, ed_evolve_and_measure
+
+# ED: finite temperature
+export thermal_energy, effective_beta, effective_temperature
+export thermal_diagonal, thermal_sz_correlations, full_sz_values
+
+# Finite-T purification (MPS, imaginary-time TDVP)
+export maximally_mixed_purification, purify_mpo, embed_physical
+export cool_purification!, thermal_sz_from_purification
+
+# Analysis: coarsening observables (source-agnostic)
+export connected_matrix, staggered_correlator, domain_length
+export structure_factor, staggered_magnetization_sq
 
 end # module QuenchDyn

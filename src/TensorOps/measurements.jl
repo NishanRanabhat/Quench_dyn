@@ -162,6 +162,42 @@ function measure_correlation(mps::MPS, op_L::Matrix, site_L::Int, op_R::Matrix, 
     return C[1, 1]
 end
 
+"""
+    measure_local_profile(mps::MPS, op::Matrix)
+
+Vector of single-site expectations ⟨ψ|op_i|ψ⟩ for i = 1, …, N.
+MPS analog of `ed_local_profile`.
+"""
+function measure_local_profile(mps::MPS, op::Matrix)
+    N = length(mps.tensors)
+    return [real(measure_local_observable(mps, op, i)) for i in 1:N]
+end
+
+"""
+    measure_correlation_matrix(mps::MPS, op1::Matrix, op2::Matrix)
+
+N×N matrix C[i,j] = ⟨ψ|op1_i op2_j|ψ⟩. Off-diagonal entries use
+`measure_correlation`; the diagonal uses C[i,i] = ⟨ψ|(op1·op2)_i|ψ⟩. Both
+triangles are computed explicitly (C[i,j] and C[j,i] coincide only when
+op1 = op2). MPS analog of `ed_correlation_matrix`.
+
+Cost is O(N³): O(N²) pairs, each a full O(N) MPS contraction. Fine for a
+one-off measurement; reuse a left-environment sweep if it becomes a bottleneck.
+"""
+function measure_correlation_matrix(mps::MPS, op1::Matrix, op2::Matrix)
+    N = length(mps.tensors)
+    op_diag = op1 * op2
+    C = zeros(Float64, N, N)
+    for i in 1:N
+        C[i, i] = real(measure_local_observable(mps, op_diag, i))
+        for j in i+1:N
+            C[i, j] = real(measure_correlation(mps, op1, i, op2, j))
+            C[j, i] = real(measure_correlation(mps, op2, i, op1, j))
+        end
+    end
+    return C
+end
+
 # ── Full-space conversions (for small systems / debugging) ────────────────
 
 """
