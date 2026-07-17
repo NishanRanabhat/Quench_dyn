@@ -1,6 +1,9 @@
 module QuenchDyn
 
+using JLD2
 using LinearAlgebra
+using Printf: @sprintf
+using Serialization
 using TensorOperations
 
 # ── Core types and operators ───────────────────────────────────────────────
@@ -37,9 +40,15 @@ include("ED/sectors.jl")
 include("ED/eigensolver.jl")
 include("ED/observables.jl")
 include("ED/thermal.jl")
+include("ED/cache.jl")
+include("ED/fcs.jl")
 
 # ── Analysis ──────────────────────────────────────────────────────────────
 include("Analysis/coarsening.jl")
+include("Analysis/fcs.jl")
+
+# ── IO (MPS snapshot checkpointing) ────────────────────────────────────────
+include("IO/serialization.jl")
 
 # ── Exports ───────────────────────────────────────────────────────────────
 
@@ -83,6 +92,7 @@ export build_xxz_hamiltonian
 
 # ED: magnetization sectors
 export SzSector, sz_sector, build_xxz_hamiltonian_sector
+export build_lr_xxz_hamiltonian_sector
 
 # ED: eigensolver
 export EDEigensystem, diagonalize, ground_state, low_energy_states
@@ -95,6 +105,22 @@ export ed_time_evolve, ed_evolve_and_measure
 # ED: finite temperature
 export thermal_energy, effective_beta, effective_temperature
 export thermal_diagonal, thermal_sz_correlations, full_sz_values
+
+# ED: spectrum cache + ensemble probability vectors
+export load_spectrum, load_initial_state
+export thermal_weights, diagonal_probabilities
+export quench_amplitudes, quench_probabilities, quench_state
+
+# ED: staggered-magnetization FCS + domain-wall statistics
+export staggered_values, staggered_fcs, fcs_moments
+export wall_counts, wall_distribution, wall_stats
+
+# MPS: generating-function FCS (Analysis/fcs.jl; adds MPS methods to staggered_fcs)
+export fcs_generating_function, fcs_distribution, fcs_summary
+export staggered_generating_function, staggered_phase_op
+
+# IO: MPS snapshot checkpointing (JLD2)
+export save_mps, load_mps, run_root, snapshot_name, snapshot_time
 
 # Finite-T purification (MPS, imaginary-time TDVP)
 export maximally_mixed_purification, purify_mpo, embed_physical
