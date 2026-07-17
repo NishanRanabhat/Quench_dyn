@@ -112,3 +112,59 @@ end
 function build_xxz_hamiltonian_sector(sec::SzSector, J::Float64, Delta::Float64)
     return build_xxz_hamiltonian_sector(sec, J, Delta, zeros(Float64, sec.N))
 end
+
+"""
+    build_lr_xxz_hamiltonian_sector(sec::SzSector, J, Delta, alpha,
+                                    h::AbstractVector{Float64})
+
+Long-range XXZ chain with a power-law, STAGGERED-SIGN Ising channel and
+nearest-neighbor XY exchange, projected onto the sector `sec`:
+
+    H = J Σ_i (Sx_i Sx_{i+1} + Sy_i Sy_{i+1})
+      + J Δ Σ_{i<j} (−1)^{r+1} r^{−α} Sz_i Sz_j ,   r = j − i
+      + Σ_i h_i Sz_i
+
+The alternating sign makes every bond SUPPORT the staggered (Néel) pattern —
+AFM at odd r, FM at even r — i.e. the sublattice-gauge image of Dyson's
+unfrustrated ferromagnet, so the Z2 staggered order has a finite-temperature
+transition for α ≤ 2 (a uniform-sign AFM tail would instead frustrate the
+even-r bonds and destroy the ordered phase). A uniform-sign FM channel is
+also the wrong model here: its order parameter (total S^z) is conserved by
+XXZ dynamics. With the staggered channel the order parameter m_s is
+non-conserved (Model-A-like) while total S^z conservation — and hence the
+sector construction — is untouched. r = 1 reproduces the short-range sign
+convention (+Δ, AFM), and α → ∞ recovers `build_xxz_hamiltonian_sector`.
+Open boundaries, no Kac rescaling (α > 1 keeps the energy density additive).
+"""
+function build_lr_xxz_hamiltonian_sector(sec::SzSector, J::Float64, Delta::Float64,
+                                         alpha::Float64, h::AbstractVector{Float64})
+    N = sec.N
+    @assert length(h) == N "Field vector h must have length N=$N"
+    Jz = [J * Delta * (-1.0)^(r + 1) / r^alpha for r in 1:N-1]
+    dim = length(sec)
+    H = zeros(Float64, dim, dim)
+    for (k, c) in enumerate(sec.configs)
+        diag = 0.0
+        for i in 1:N-1, j in i+1:N
+            diag += Jz[j-i] * sec.sz[k, i] * sec.sz[k, j]
+        end
+        for i in 1:N
+            diag += h[i] * sec.sz[k, i]
+        end
+        H[k, k] += diag
+        for i in 1:N-1
+            up_i  = (c >> (i - 1)) & 1
+            up_i1 = (c >> i) & 1
+            if up_i != up_i1
+                cflip = c ⊻ ((1 << (i - 1)) | (1 << i))
+                H[sec.index[cflip], k] += J / 2
+            end
+        end
+    end
+    return Hermitian(H)
+end
+
+function build_lr_xxz_hamiltonian_sector(sec::SzSector, J::Float64, Delta::Float64,
+                                         alpha::Float64)
+    return build_lr_xxz_hamiltonian_sector(sec, J, Delta, alpha, zeros(Float64, sec.N))
+end
